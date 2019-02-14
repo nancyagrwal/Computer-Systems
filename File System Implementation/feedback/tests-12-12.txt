@@ -1,0 +1,162 @@
+Script started on 2018-12-13 06:12:02+0000
+pjd@CS5600-f18-Ubuntu32:~/2018-fall/cs5600-f18/hw3/repos/team-1-hw3$ make clean
+rm -f *.o homework mktest read-img mkfs-hw3 libhw3.so *.gcda *.gcno *.gcov
+pjd@CS5600-f18-Ubuntu32:~/2018-fall/cs5600-f18/hw3/repos/team-1-hw3$ make COVERAGE=1
+cc -g -Wall -fprofile-arcs -ftest-coverage -DREAL_FS   -c -o misc.o misc.c
+cc -g -Wall -fprofile-arcs -ftest-coverage   -c -o homework.o homework.c
+gcc -g misc.o homework.o -o homework -lfuse --coverage
+cc -g -Wall -fprofile-arcs -ftest-coverage    mktest.c   -o mktest
+cc -g -Wall -fprofile-arcs -ftest-coverage    read-img.c   -o read-img
+cc -g -Wall -fprofile-arcs -ftest-coverage    mkfs-hw3.c   -o mkfs-hw3
+gcc libhw3.c homework.c misc.c -o libhw3.so -g -Wall -fprofile-arcs -ftest-coverage -shared -fPIC  --coverage
+pjd@CS5600-f18-Ubuntu32:~/2018-fall/cs5600-f18/hw3/repos/team-1-hw3$ python ../../test-1q1.py
+Test 1, getattr:
+   /
+   /file.A
+   /dir1
+   /dir1/file.2
+   /dir1/file.0
+   /dir1/file.270
+   /file.7
+.Test 2, readdir:
+  /
+  /dir1/
+.Test 3, full read:
+   /file.A
+   file.7
+   dir1/file.0
+   dir1/file.2
+   /dir1/file.270
+.Test 4, small reads:
+.Test 5, getattr failure cases:
+   /not-a-file : ENOENT
+   /dir1/not-a-file : ENOENT
+   /not-a-dir/file.0 : ENOENT
+   /file.A/file.0 : ENOTDIR
+   /dir1/file.0/testing : ENOTDIR
+   /dir1/thisisaverylongnamelongerthan27chars : ENOENT
+.Test 6, read failure cases:
+   /not-a-file : ENOENT
+   /dir1 : EISDIR
+   /not-a-dir/file.0 : ENOENT
+   /file.A/file.0 : ENOTDIR
+.Test 7, readdir failure cases:
+   /not-a-dir : ENOENT
+   /file.A : ENOTDIR
+   /not-a-dir/file.0 : ENOENT
+   /dir1/file.0 : ENOTDIR
+.Test 8, vfsstat
+.
+----------------------------------------------------------------------
+Ran 8 tests in 0.179s
+
+OK
+pjd@CS5600-f18-Ubuntu32:~/2018-fall/cs5600-f18/hw3/repos/team-1-hw3$ ^1^2
+python ../../test-q2.py
+Test 1, mkdir (top level):
+.Test 2, mkdir (subdirectories)
+3 subdirs... 31 subdirs... 32 subdirs...
+.Test 3, create
+3 files... 31 files... 32 files...
+.Test 4, long names
+.Test 5, bad paths
+ create:   doesntexist/path : ENOENT
+  file/path : ENOTDIR
+  dir : EEXIST
+  file : EEXIST
+
+ mkdir:   doesntexist/path : EEXIST
+  file/path : ENOENT
+  dir : ENOTDIR
+  file : EEXIST
+
+.Test 6, write
+/test6/dir-12/file-17 12 17
+/test6/dir-12/file-100 12 100
+/test6/dir-12/file-1000 12 1000
+/test6/dir-12/file-1024 12 1024
+/test6/dir-12/file-1970 12 1970
+/test6/dir-12/file-3000 12 3000
+/test6/dir-577/file-17 577 17
+/test6/dir-577/file-100 577 100
+/test6/dir-577/file-1000 577 1000
+/test6/dir-577/file-1024 577 1024
+/test6/dir-577/file-1970 577 1970
+/test6/dir-577/file-3000 577 3000
+/test6/dir-1011/file-17 1011 17
+/test6/dir-1011/file-100 1011 100
+/test6/dir-1011/file-1000 1011 1000
+/test6/dir-1011/file-1024 1011 1024
+/test6/dir-1011/file-1970 1011 1970
+/test6/dir-1011/file-3000 1011 3000
+/test6/dir-1024/file-17 1024 17
+/test6/dir-1024/file-100 1024 100
+/test6/dir-1024/file-1000 1024 1000
+/test6/dir-1024/file-1024 1024 1024
+/test6/dir-1024/file-1970 1024 1970
+/test6/dir-1024/file-3000 1024 3000
+/test6/dir-1025/file-17 1025 17
+/test6/dir-1025/file-100 1025 100
+/test6/dir-1025/file-1000 1025 1000
+/test6/dir-1025/file-1024 1025 1024
+/test6/dir-1025/file-1970 1025 1970
+/test6/dir-1025/file-3000 1025 3000
+/test6/dir-2001/file-17 2001 17
+/test6/dir-2001/file-100 2001 100
+/test6/dir-2001/file-1000 2001 1000
+/test6/dir-2001/file-1024 2001 1024
+/test6/dir-2001/file-1970 2001 1970
+/test6/dir-2001/file-3000 2001 3000
+/test6/dir-8099/file-17 8099 17
+/test6/dir-8099/file-100 8099 100
+/test6/dir-8099/file-1000 8099 1000
+/test6/dir-8099/file-1024 8099 1024
+/test6/dir-8099/file-1970 8099 1970
+/test6/dir-8099/file-3000 8099 3000
+/test6/dir-37000/file-17 37000 17
+/test6/dir-37000/file-100 37000 100
+/test6/dir-37000/file-1000 37000 1000
+/test6/dir-37000/file-1024 37000 1024
+/test6/dir-37000/file-1970 37000 1970
+/test6/dir-37000/file-3000 37000 3000
+/test6/dir-289150/file-17 289150 17
+/test6/dir-289150/file-100 289150 100
+/test6/dir-289150/file-1000 289150 1000
+/test6/dir-289150/file-1024 289150 1024
+/test6/dir-289150/file-1970 289150 1970
+/test6/dir-289150/file-3000 289150 3000
+.Test 7, unlink
+/test7/file-12
+/test7/file-577
+/test7/file-1011
+/test7/file-1024
+/test7/file-1025
+/test7/file-2001
+/test7/file-8099
+/test7/file-37000
+/test7/file-289150
+.Test 8, rmdir
+.Test 9, rename
+.../test12/file-12
+/test12/file-577
+/test12/file-1011
+/test12/file-1024
+/test12/file-1025
+/test12/file-2001
+/test12/file-8099
+/test12/file-37000
+/test12/file-289150
+.
+----------------------------------------------------------------------
+Ran 12 tests in 1.568s
+
+OK
+pjd@CS5600-f18-Ubuntu32:~/2018-fall/cs5600-f18/hw3/repos/team-1-hw3$ gcov homework.c
+File 'homework.c'
+Lines executed:94.82% of 463
+Creating 'homework.c.gcov'
+
+pjd@CS5600-f18-Ubuntu32:~/2018-fall/cs5600-f18/hw3/repos/team-1-hw3$ exit
+exit
+
+Script done on 2018-12-13 06:12:34+0000

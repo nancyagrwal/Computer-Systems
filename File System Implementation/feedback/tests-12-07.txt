@@ -1,0 +1,115 @@
+Script started on Sat 08 Dec 2018 06:18:25 AM UTC
+pjd@CS5600-f18-Ubuntu32:~/2018-fall/cs5600-f18/hw3/repos/team-1-hw3$ make clean
+rm -f *.o homework mktest read-img mkfs-hw3 libhw3.so *.gcda *.gcno *.gcov
+pjd@CS5600-f18-Ubuntu32:~/2018-fall/cs5600-f18/hw3/repos/team-1-hw3$ make COVERAGE=1
+cc -g -Wall -fprofile-arcs -ftest-coverage -DREAL_FS   -c -o misc.o misc.c
+cc -g -Wall -fprofile-arcs -ftest-coverage   -c -o homework.o homework.c
+homework.c: In function ‘dealloc’:
+homework.c:626:1: warning: control reaches end of non-void function [-Wreturn-type]
+ }
+ ^
+gcc -g misc.o homework.o -o homework -lfuse --coverage
+cc -g -Wall -fprofile-arcs -ftest-coverage    mktest.c   -o mktest
+cc -g -Wall -fprofile-arcs -ftest-coverage    read-img.c   -o read-img
+cc -g -Wall -fprofile-arcs -ftest-coverage    mkfs-hw3.c   -o mkfs-hw3
+gcc libhw3.c homework.c misc.c -o libhw3.so -g -Wall -fprofile-arcs -ftest-coverage -shared -fPIC  --coverage
+homework.c: In function ‘dealloc’:
+homework.c:626:1: warning: control reaches end of non-void function [-Wreturn-type]
+ }
+ ^
+pjd@CS5600-f18-Ubuntu32:~/2018-fall/cs5600-f18/hw3/repos/team-1-hw3$ python ../.././mktest test.img
+pjd@CS5600-f18-Ubuntu32:~/2018-fall/cs5600-f18/hw3/repos/team-1-hw3$ python ../../test-q1.p y
+Test 1, getattr:
+   /
+   /file.A
+   /dir1
+   /dir1/file.2
+   /dir1/file.0
+   /dir1/file.270
+   /file.7
+.Test 2, readdir:
+  /
+  /dir1/
+.Test 3, full read:
+   /file.A
+   file.7
+   dir1/file.0
+   dir1/file.2
+   /dir1/file.270
+.Test 4, small reads:
+.Test 5, getattr failure cases:
+   /not-a-file : ENOENT
+   /dir1/not-a-file : ENOENT
+   /not-a-dir/file.0 : ENOENT
+   /file.A/file.0 : ENOTDIR
+   /dir1/file.0/testing : ENOTDIR
+   /dir1/thisisaverylongnamelongerthan27chars : ENOENT
+.Test 6, read failure cases:
+   /not-a-file : ENOENT
+   /dir1 : EISDIR
+   /not-a-dir/file.0 : ENOENT
+   /file.A/file.0 : ENOTDIR
+.Test 7, readdir failure cases:
+   /not-a-dir : ENOENT
+   /file.A : ENOTDIR
+   /not-a-dir/file.0 : ENOENT
+   /dir1/file.0 : ENOTDIR
+.Test 8, vfsstat
+F
+======================================================================
+FAIL: test_8_stat (__main__.tests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "../../test-q1.py", line 141, in test_8_stat
+    self.assertEquals(stat.f_blocks, 1024, msg='f_blocks')
+AssertionError: f_blocks
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.370s
+
+FAILED (failures=1)
+pjd@CS5600-f18-Ubuntu32:~/2018-fall/cs5600-f18/hw3/repos/team-1-hw3$ python ../../test-q2.p y
+Test 1, mkdir (top level):
+Segmentation fault (core dumped)
+pjd@CS5600-f18-Ubuntu32:~/2018-fall/cs5600-f18/hw3/repos/team-1-hw3$ gdb --args !!
+gdb --args python ../../test-q2.py
+GNU gdb (Ubuntu 7.11.1-0ubuntu1~16.5) 7.11.1
+Copyright (C) 2016 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.  Type "show copying"
+and "show warranty" for details.
+This GDB was configured as "i686-linux-gnu".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<http://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+<http://www.gnu.org/software/gdb/documentation/>.
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from python...(no debugging symbols found)...done.
+(gdb) run
+Starting program: /usr/bin/python ../../test-q2.py
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/i386-linux-gnu/libthread_db.so.1".
+Test 1, mkdir (top level):
+
+Program received signal SIGSEGV, Segmentation fault.
+__strncpy_sse2 () at ../sysdeps/i386/i686/multiarch/strcpy-sse2.S:127
+127	../sysdeps/i386/i686/multiarch/strcpy-sse2.S: No such file or directory.
+(gdb) up
+#1  0xb7aa056d in obtain_base_directory (
+    _path=0x8485af8 "\200\n\372\267\200\n\372\267\360ZH\b\360ZH\b\200\n\372\267\200", <incomplete sequence \372\267>, parent_dir=0xbfffd5f0, base_path=0xbfffd5ec) at homework.c:326
+326	    strncpy(*parent_dir, p, last_delim);
+(gdb) up
+#2  0xb7aa0709 in fs_mkdir (path=0xb7ae1d14 "/test1", mode=493) at homework.c:357
+357	    obtain_base_directory(_path, &parent_dir, &base_path);
+(gdb) p q
+A debugging session is active.
+
+	Inferior 1 [process 6493] will be killed.
+
+Quit anyway? (y or n) y
+pjd@CS5600-f18-Ubuntu32:~/2018-fall/cs5600-f18/hw3/repos/team-1-hw3$ exit
+
+Script done on Sat 08 Dec 2018 06:19:38 AM UTC

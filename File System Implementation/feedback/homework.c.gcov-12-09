@@ -1,0 +1,1040 @@
+        -:    0:Source:homework.c
+        -:    0:Graph:homework.gcno
+        -:    0:Data:homework.gcda
+        -:    0:Runs:2
+        -:    0:Programs:1
+        -:    1:/*
+        -:    2: * file:        homework.c
+        -:    3: * description: skeleton file for CS 5600 file system
+        -:    4: *
+        -:    5: * CS 5600, Computer Systems, Northeastern CCIS
+        -:    6: * Peter Desnoyers, November 2018
+        -:    7: */
+        -:    8:
+        -:    9:#define FUSE_USE_VERSION 27
+        -:   10:#define _FILE_OFFSET_BITS 64
+        -:   11:
+        -:   12:#include <stdlib.h>
+        -:   13:#include <stddef.h>
+        -:   14:#include <unistd.h>
+        -:   15:#include <fuse.h>
+        -:   16:#include <fcntl.h>
+        -:   17:#include <string.h>
+        -:   18:#include <stdio.h>
+        -:   19:#include <errno.h>
+        -:   20:#include <sys/mman.h>
+        -:   21:#include <assert.h>
+        -:   22:#include "fsx600.h"
+        -:   23:
+        -:   24:// Make GCC happy and not emit warnings
+        -:   25:#define UNUSED __attribute__((unused))
+        -:   26:
+        -:   27:/* disk access. All access is in terms of 1024-byte blocks; read and
+        -:   28: * write functions return 0 (success) or -EIO.
+        -:   29: */
+        -:   30://extern int block_read(void* buf, int lba, int nblks);
+        -:   31:
+        -:   32:// Only slightly evil way to avoid extremely repetitive error handling
+        -:   33:#define CALL_OR_RET_ERROR(funname, varname)\
+        -:   34:int varname = funname;\
+        -:   35:if(varname < 0) {\
+        -:   36:    return varname; \
+        -:   37:}
+        -:   38:
+        -:   39:static void split_path(const char* _path, char** parent_path, char** file_name);
+        -:   40:
+        -:   41:extern int block_read(void* buf, int lba, int nblks);
+        -:   42:
+        -:   43:extern int block_write(void* buf, int lba, int nblks);
+        -:   44:
+        -:   45:static int get_blk_number(int inodenum, int num, int alloc_on_fail);
+        -:   46:
+        -:   47:static int read_inode(int index, char* buf, size_t len, off_t offset);
+        -:   48:
+        -:   49:static int write_inode(int index, const char* buf, size_t len, off_t offset);
+        -:   50:
+        -:   51:int locate_entry(const char* file_name, const struct fs_dirent* directory_entries, int num_entries) ;
+        -:   52:
+        -:   53:unsigned char* inode_map, * block_map;
+        -:   54:int inode_m_base;
+        -:   55:int block_m_base;
+        -:   56:struct fs_inode* inodes;
+        -:   57:int no_of_inodes;
+        -:   58:int inode_base;
+        -:   59:int no_of_blocks;
+        -:   60:int root_inode;
+        -:   61:struct fs_super* super_block;
+        -:   62:
+        -:   63:/* bitmap functions
+        -:   64: */
+     2950:   65:void bit_set(unsigned char* map, int i) {
+     2950:   66:    map[i / 8] |= (1 << (i % 8));
+     2950:   67:}
+        -:   68:
+      691:   69:void bit_clear(unsigned char* map, int i) {
+      691:   70:    map[i / 8] &= ~(1 << (i % 8));
+      691:   71:}
+        -:   72:
+  4222884:   73:int bit_test(const unsigned char* map, int i) {
+  4222884:   74:    return map[i / 8] & (1 << (i % 8));
+        -:   75:}
+        -:   76:
+    24629:   77:int flush_inodes_bitmaps() {
+    24629:   78:    CALL_OR_RET_ERROR(block_write(inode_map, inode_m_base, super_block->inode_map_sz), write1);
+        -:   79:
+    24629:   80:    CALL_OR_RET_ERROR (block_write(block_map, block_m_base, super_block->block_map_sz), write2);
+        -:   81:
+    24629:   82:    CALL_OR_RET_ERROR (block_write(inodes, inode_base, super_block->inode_region_sz), write3);
+        -:   83:
+    24629:   84:    return 0;
+        -:   85:}
+        -:   86:
+        -:   87:/* init - this is called once by the FUSE framework at startup. Ignore
+        -:   88: * the 'conn' argument.
+        -:   89: * recommended actions:
+        -:   90: *   - read superblock
+        -:   91: *   - allocate memory, read bitmaps and inodes
+        -:   92: */
+        2:   93:void* fs_init(__attribute__((unused)) struct fuse_conn_info* conn){
+        -:   94:
+        -:   95:    // Clear previous init in case init is called multiple times (like during testing)
+        2:   96:    if(inode_map) free(inode_map);
+        2:   97:    if(block_map) free(block_map);
+        2:   98:    if(inodes) free(inodes);
+        2:   99:    if(super_block) free(super_block);
+        -:  100:
+        -:  101:    struct fs_super sb;
+        2:  102:    if (block_read(&sb, 0, 1) < 0)
+    #####:  103:        exit(1);
+        -:  104:
+        -:  105:    /* your code here */
+        -:  106:
+        -:  107:    /* Write the inode and block map after the superblock */
+        2:  108:    inode_m_base = 1;
+        2:  109:    inode_map = malloc(sb.inode_map_sz * FS_BLOCK_SIZE);
+        2:  110:    if (block_read(inode_map, inode_m_base, sb.inode_map_sz) < 0)
+    #####:  111:        exit(1);
+        -:  112:
+        2:  113:    block_m_base = inode_m_base + sb.inode_map_sz;
+        2:  114:    block_map = malloc(sb.block_map_sz * FS_BLOCK_SIZE);
+        2:  115:    if (block_read(block_map, block_m_base, sb.block_map_sz) < 0)
+    #####:  116:        exit(1);
+        -:  117:
+        -:  118:    /* Next write the inode data next to the set of blocks */
+        2:  119:    inode_base = block_m_base + sb.block_map_sz;
+        -:  120:
+        -:  121:    //calculate the number of inodes:
+        2:  122:    no_of_inodes = sb.inode_region_sz * INODES_PER_BLK;
+        2:  123:    inodes = malloc(sb.inode_region_sz * FS_BLOCK_SIZE);
+        2:  124:    if (block_read(inodes, inode_base, sb.inode_region_sz) < 0)
+    #####:  125:        exit(1);
+        -:  126:
+        2:  127:    no_of_blocks = sb.num_blocks;
+        2:  128:    root_inode = sb.root_inode;
+        2:  129:    super_block = malloc(sizeof(struct fs_super));
+        2:  130:    memcpy(super_block, &sb, sizeof(struct fs_super));
+        -:  131:
+        2:  132:    return NULL;
+        -:  133:}
+        -:  134:
+     2762:  135:static int block_allocation() {
+        -:  136:    int c;
+  4152079:  137:    for (c = 0; c < no_of_blocks; c++) {
+  4152079:  138:        if (!bit_test(block_map, c)) {
+     2762:  139:            bit_set(block_map, c);
+     2762:  140:            return c;
+        -:  141:        }
+        -:  142:    }
+    #####:  143:    return -ENOSPC;
+        -:  144:}
+        -:  145:
+        -:  146:/* Note on path translation errors:
+        -:  147: * In addition to the method-specific errors listed below, almost
+        -:  148: * every method can return one of the following errors if it fails to
+        -:  149: * locate a file or directory corresponding to a specified path.
+        -:  150: *
+        -:  151: * ENOENT - a component of the path doesn't exist
+        -:  152: * ENOTDIR - an intermediate component of the path (e.g. 'b' in
+        -:  153: *           /a/b/c) is not a directory
+        -:  154: */
+        -:  155:
+        -:  156:
+        -:  157:/* note on splitting the 'path' variable:
+        -:  158: * the value passed in by the FUSE framework is declared as 'const',
+        -:  159: * which means you can't modify it. The standard mechanisms for
+        -:  160: * splitting strings in C (strtok, strsep) modify the string in place,
+        -:  161: * so you have to copy the string and then free the copy when you're
+        -:  162: * done. One way of doing this:
+        -:  163: *
+        -:  164: *    char *_path = strdup(path);
+        -:  165: *    int inum = translate(_path);
+        -:  166: *    free(_path);
+        -:  167: */
+    45527:  168:static int translate(const char* path) {
+        -:  169:
+    45527:  170:    char* _path = strdup(path);
+        -:  171:
+        -:  172:    //root inode = 1:
+    45527:  173:    if (strcmp(_path, "/") == 0) {
+       20:  174:        free(_path);
+       20:  175:        return root_inode;
+        -:  176:    }
+        -:  177:
+    45507:  178:    int index = 1;
+        -:  179:
+        -:  180:    // split the path and traverse:
+    45507:  181:    char* token = strtok(_path, "/");
+    45507:  182:    while (token != NULL) {
+   114793:  183:        struct fs_inode current_inode = inodes[index];
+        -:  184:
+        -:  185:        // check if a directory:
+   114793:  186:        if (!S_ISDIR(current_inode.mode)) {
+        5:  187:            free(_path);
+      217:  188:            return -ENOTDIR;
+        -:  189:        }
+        -:  190:
+   114788:  191:        if (strcmp(".", token) == 0) {
+    #####:  192:            token = strtok(NULL, "/");
+    #####:  193:            continue;
+        -:  194:        }
+        -:  195:
+   114788:  196:        int numentries = current_inode.size / sizeof(struct fs_dirent);
+   114788:  197:        struct fs_dirent* dir_entries = malloc((size_t) current_inode.size);
+        -:  198:
+   114788:  199:        int read = read_inode(index, (char*) dir_entries, (size_t) current_inode.size, 0);
+        -:  200:
+   114788:  201:        if(read < 0){
+    #####:  202:            free(dir_entries);
+    #####:  203:            free(_path);
+    #####:  204:            return read;
+        -:  205:        }
+        -:  206:
+   114788:  207:        int entry = locate_entry(token, dir_entries, numentries);
+        -:  208:
+   114788:  209:        if(entry < 0){
+      207:  210:            free(dir_entries);
+      207:  211:            free(_path);
+      207:  212:            return entry;
+        -:  213:        }
+        -:  214:
+   114581:  215:        index = dir_entries[entry].inode;
+        -:  216:
+   114581:  217:        free(dir_entries);
+        -:  218:
+   114581:  219:        token = strtok(NULL, "/");
+        -:  220:    }
+    45295:  221:    free(_path);
+    45295:  222:    return index;
+        -:  223:}
+        -:  224:
+      167:  225:static void inode_getattr(int inodenum, struct stat* sb) {
+      167:  226:    struct fs_inode i = inodes[inodenum];
+        -:  227:
+        -:  228:    // set the static fields here:
+      167:  229:    memset(sb, 0, sizeof(*sb));
+      167:  230:    sb->st_uid = i.uid;
+      167:  231:    sb->st_gid = i.gid;
+      167:  232:    sb->st_mode = i.mode;
+      167:  233:    sb->st_ctime = (time_t) i.ctime;
+      167:  234:    sb->st_atime = (time_t) i.mtime;
+      167:  235:    sb->st_mtime = (time_t) i.mtime;
+      167:  236:    sb->st_size = i.size;
+      167:  237:    sb->st_nlink = 1;
+      167:  238:    sb->st_blksize = FS_BLOCK_SIZE;
+      167:  239:    sb->st_blocks = (i.size + FS_BLOCK_SIZE - 1) / FS_BLOCK_SIZE;
+      167:  240:}
+        -:  241:
+        -:  242:/* getattr - get file or directory attributes. For a description of
+        -:  243: *  the fields in 'struct stat', see 'man lstat'.
+        -:  244: *
+        -:  245: * Note - fields not provided in fsx600 are:
+        -:  246: *    st_nlink - always set to 1
+        -:  247: *    st_atime - set to same value as st_mtime
+        -:  248: *
+        -:  249: * errors - path translation, ENOENT
+        -:  250: */
+      102:  251:static int fs_getattr(const char* path, struct stat* sb) {
+        -:  252:
+        -:  253:    // search for inode in the path:
+      102:  254:    int index = translate(path);
+        -:  255:
+      102:  256:    if (index < 0)
+        7:  257:        return index;
+        -:  258:
+       95:  259:    inode_getattr(index, sb);
+        -:  260:
+       95:  261:    return 0;
+        -:  262:}
+        -:  263:
+        -:  264:/* readdir - get directory contents.
+        -:  265: *
+        -:  266: * for each entry in the directory, invoke the 'filler' function,
+        -:  267: * which is passed as a function pointer, as follows:
+        -:  268: *     filler(buf, <name>, <statbuf>, 0)
+        -:  269: * where <statbuf> is a pointer to struct stat, just like in getattr.
+        -:  270: *
+        -:  271: * Errors - path resolution, ENOTDIR, ENOENT
+        -:  272: */
+       12:  273:static int fs_readdir(const char* path, void* ptr, fuse_fill_dir_t filler,
+        -:  274:                      UNUSED off_t offset, UNUSED struct fuse_file_info* fi) {
+        -:  275:
+       12:  276:    int index = translate(path);
+       12:  277:    if (index < 0)
+        2:  278:        return index;
+        -:  279:
+       10:  280:    struct fs_inode* i = &inodes[index];
+        -:  281:
+       10:  282:    if (!S_ISDIR(i->mode))
+        2:  283:        return -ENOTDIR;
+        -:  284:
+        8:  285:    struct fs_dirent* directory_entries = malloc((size_t) i->size);
+        8:  286:    int num_entries = i->size / sizeof(struct fs_dirent);
+        -:  287:
+        8:  288:    read_inode(index, (char*) directory_entries, (size_t) i->size, 0);
+        -:  289:
+        -:  290:    struct stat sb;
+        -:  291:
+      138:  292:    for (int j = 0; j < num_entries; j++) {
+        -:  293:        // if the directory entries are valid:
+      130:  294:        if (directory_entries[j].valid) {
+        -:  295:
+       72:  296:            inode_getattr(directory_entries[j].inode, &sb);
+        -:  297:
+        -:  298:            /* insert entry into the buffer */
+       72:  299:            filler(ptr, directory_entries[j].name, &sb, 0);
+        -:  300:        }
+        -:  301:    }
+        -:  302:
+        8:  303:    free(directory_entries);
+        8:  304:    return 0;
+        -:  305:}
+        -:  306:
+      191:  307:static int add_to_directory(uint32_t dirnode, uint32_t childnode, const char* name) {
+      191:  308:    struct fs_inode* parent_dir = &inodes[dirnode];
+        -:  309:
+      191:  310:    if (!S_ISDIR(parent_dir->mode))
+        1:  311:        return -ENOTDIR;
+        -:  312:
+        -:  313:    // Find an opening in the directory
+      190:  314:    int num_entries = parent_dir->size / sizeof(struct fs_dirent);
+        -:  315:
+      190:  316:    struct fs_dirent* entries = malloc(num_entries * sizeof(struct fs_dirent));
+        -:  317:
+      190:  318:    CALL_OR_RET_ERROR(read_inode(dirnode, (char*) entries, (size_t) parent_dir->size, 0), read_err);
+        -:  319:
+        -:  320:    // Make sure it doesn't exist already
+     2001:  321:    for (int i = 0; i < num_entries; i++) {
+     1811:  322:        if (entries[i].valid) {
+     1386:  323:            if (strncmp(entries[i].name, name, 27) == 0) {
+    #####:  324:                return -EEXIST;
+        -:  325:            }
+        -:  326:        }
+        -:  327:    }
+        -:  328:
+        -:  329:    // Where the entry should go
+        -:  330:    // Default to appending at end of existing entries
+      190:  331:    int slot = num_entries;
+        -:  332:
+     1575:  333:    for (int i = 0; i < num_entries; i++) {
+     1405:  334:        if (!entries[i].valid) {
+       20:  335:            slot = i;
+       20:  336:            break;
+        -:  337:        }
+        -:  338:    }
+        -:  339:
+      190:  340:    free(entries);
+        -:  341:
+        -:  342:    struct fs_dirent newentry;
+        -:  343:
+      190:  344:    newentry.valid = 1;
+      190:  345:    newentry.isDir = (uint32_t) S_ISDIR(inodes[childnode].mode);
+      190:  346:    newentry.inode = childnode;
+      190:  347:    strncpy((char*) &newentry.name, name, 27);
+      190:  348:    newentry.name[27] = 0;
+        -:  349:
+      190:  350:    CALL_OR_RET_ERROR(
+        -:  351:            write_inode(dirnode, (char*) &newentry, sizeof(struct fs_dirent), slot * sizeof(struct fs_dirent)),
+        -:  352:            write_err);
+        -:  353:
+      190:  354:    return slot;
+        -:  355:}
+        -:  356:
+   114800:  357:int locate_entry(const char* file_name, const struct fs_dirent* directory_entries, int num_entries) {
+   114800:  358:    int matching_entry = -ENOENT;
+        -:  359:
+   810334:  360:    for (int c = 0; c < num_entries; c++) {
+   810127:  361:        if (directory_entries[c].valid == 1 && strcmp(directory_entries[c].name, file_name) == 0) {
+   114593:  362:            matching_entry = c;
+   114593:  363:            break;
+        -:  364:        }
+        -:  365:    }
+   114800:  366:    return matching_entry;
+        -:  367:}
+        -:  368:
+        -:  369:/**
+        -:  370: * Returns the inode number of the removed entry
+        -:  371: */
+       13:  372:static int remove_from_directory(uint32_t dirnode, const char* file_name) {
+       13:  373:    struct fs_inode* parent_dir = &inodes[dirnode];
+        -:  374:
+       13:  375:    if (!S_ISDIR(parent_dir->mode))
+        1:  376:        return -ENOTDIR;
+        -:  377:
+       12:  378:    int num_entries = parent_dir->size / sizeof(struct fs_dirent);
+        -:  379:
+       12:  380:    struct fs_dirent* directory_entries = malloc(num_entries * sizeof(struct fs_dirent));
+        -:  381:
+        -:  382:    // Read all directory entries
+       12:  383:    CALL_OR_RET_ERROR(read_inode(dirnode, (char*) directory_entries, (size_t) parent_dir->size, 0), read_err);
+        -:  384:
+       12:  385:    CALL_OR_RET_ERROR(locate_entry(file_name, directory_entries, num_entries), matching_entry);
+        -:  386:
+       12:  387:    directory_entries[matching_entry].valid = 0;
+       12:  388:    int node = directory_entries[matching_entry].inode;
+        -:  389:
+       24:  390:    write_inode(dirnode,
+       12:  391:                (char*) &directory_entries[matching_entry],
+        -:  392:                sizeof(struct fs_dirent),
+       12:  393:                matching_entry * sizeof(struct fs_dirent));
+        -:  394:
+       12:  395:    free(directory_entries);
+        -:  396:
+       12:  397:    return node;
+        -:  398:}
+        -:  399:
+      188:  400:static int first_available_inode_idx() {
+    17899:  401:    for (int c = 0; c < no_of_inodes; c++) {
+    17899:  402:        if (!bit_test(inode_map, c)) {
+      188:  403:            return c;
+        -:  404:        }
+        -:  405:    }
+        -:  406:
+    #####:  407:    return -ENOSPC;
+        -:  408:}
+        -:  409:
+      188:  410:static int allocate_inode(uint32_t mode) {
+      188:  411:    CALL_OR_RET_ERROR(first_available_inode_idx(), alloc_idx);
+        -:  412:
+      188:  413:    bit_set(inode_map, alloc_idx);
+        -:  414:
+      188:  415:    struct fs_inode* node = &inodes[alloc_idx];
+        -:  416:
+      188:  417:    node->mode = mode;
+      188:  418:    node->size = 0;
+     1316:  419:    for (int i = 0; i < N_DIRECT; i++) {
+     1128:  420:        node->direct[i] = 0;
+        -:  421:    }
+      188:  422:    node->indir_1 = 0;
+      188:  423:    node->indir_2 = 0;
+      188:  424:    node->ctime = (uint32_t) time(NULL);
+      188:  425:    node->mtime = (uint32_t) time(NULL);
+      188:  426:    node->uid = (uint16_t) getuid();
+      188:  427:    node->gid = (uint16_t) getgid();
+        -:  428:
+      188:  429:    return alloc_idx;
+        -:  430:}
+        -:  431:
+       87:  432:static int do_fs_create(const char* base, const char* file, mode_t mode){
+       87:  433:    CALL_OR_RET_ERROR(translate(base), basenode);
+        -:  434:
+       86:  435:    CALL_OR_RET_ERROR(allocate_inode(mode), inode_num);
+        -:  436:
+       86:  437:    return add_to_directory((uint32_t) basenode, (uint32_t) inode_num, file);
+        -:  438:}
+        -:  439:
+        -:  440:/* create - create a new file with specified permissions
+        -:  441: *
+        -:  442: * Errors - path resolution, EEXIST
+        -:  443: *          in particular, for create("/a/b/c") to succeed,
+        -:  444: *          "/a/b" must exist, and "/a/b/c" must not.
+        -:  445: *
+        -:  446: * Note that 'mode' will already have the S_IFREG bit set, so you can
+        -:  447: * just use it directly.
+        -:  448: *
+        -:  449: * If a file or directory of this name already exists, return -EEXIST.
+        -:  450: * If there are already 32 entries in the directory (i.e. it's filled an
+        -:  451: * entire block), you are free to return -ENOSPC instead of expanding it.
+        -:  452: */
+       89:  453:static int fs_create(const char* path, mode_t mode, UNUSED struct fuse_file_info* fi) {
+       89:  454:    int exists = translate(path);
+       89:  455:    if(exists >= 0){
+        2:  456:        return -EEXIST;
+        -:  457:    }
+        -:  458:
+        -:  459:    char* base;
+        -:  460:    char* file;
+       87:  461:    split_path(path, &base, &file);
+        -:  462:
+       87:  463:    int ret = do_fs_create(base, file, mode);
+        -:  464:
+       87:  465:    free(base);
+       87:  466:    free(file);
+       87:  467:    CALL_OR_RET_ERROR(flush_inodes_bitmaps(), flush);
+        -:  468:
+       87:  469:    return ret;
+        -:  470:}
+        -:  471:
+      207:  472:static void split_path(const char* _path, char** parent_dir, char** file_name) {
+        -:  473:
+      207:  474:    size_t last_delim = (strrchr(_path, '/') - _path) + 1; // length of after the last "/"
+        -:  475:
+      207:  476:    char* pre_path = (char*) calloc(last_delim + 1, sizeof(char));
+        -:  477:
+      207:  478:    size_t post_path_len = strlen(_path) - last_delim;
+      207:  479:    char* post_path = (char*) calloc(post_path_len + 1, sizeof(char)); // Add 1 to leave room for null terminator
+        -:  480:
+      207:  481:    memcpy(pre_path, _path, last_delim);
+      207:  482:    memcpy(post_path, _path + last_delim, post_path_len);
+        -:  483:
+      207:  484:    *parent_dir = pre_path;
+      207:  485:    *file_name = post_path;
+      207:  486:}
+        -:  487:
+        -:  488:/* mkdir - create a directory with the given mode.
+        -:  489: * Errors - path resolution, EEXIST
+        -:  490: * Conditions for EEXIST are the same as for create. 
+        -:  491: *
+        -:  492: * If this would result in >32 entries in a directory, return -ENOSPC
+        -:  493: * Note that (unlike the 'create' case) 'mode' needs to be OR-ed with S_IFDIR.
+        -:  494: *
+        -:  495: * Note that you may want to combine the logic of fs_create and
+        -:  496: * fs_mkdir. 
+        -:  497: */
+      106:  498:static int fs_mkdir(const char* path, mode_t mode) {
+        -:  499:
+      106:  500:    if (strcmp(path, "/") == 0)
+    #####:  501:        return -EINVAL;
+        -:  502:
+      106:  503:    int index = translate(path);
+        -:  504:
+        -:  505:    // check if directory already exists:
+      106:  506:    if (index > 0)
+        2:  507:        return -EEXIST;
+        -:  508:
+        -:  509:    char* file_name;
+        -:  510:    char* parent_dir;
+      104:  511:    split_path(path, &parent_dir, &file_name);
+        -:  512:
+        -:  513:    // get inode index of the parent directory
+      104:  514:    index = translate(parent_dir);
+      104:  515:    if (index < 0)
+        1:  516:        return -ENOENT;
+        -:  517:
+        -:  518:    // find parent directory inode and check:
+      103:  519:    struct fs_inode p_inode_directory = inodes[index];
+      103:  520:    if (!S_ISDIR(p_inode_directory.mode))
+        1:  521:        return -ENOTDIR;
+        -:  522:
+      102:  523:    CALL_OR_RET_ERROR(allocate_inode(mode | S_IFDIR), new_inode)
+        -:  524:
+      102:  525:    add_to_directory((uint32_t) index, (uint32_t) new_inode, file_name);
+        -:  526:
+      102:  527:    free(file_name);
+      102:  528:    free(parent_dir);
+        -:  529:
+      102:  530:    return flush_inodes_bitmaps();
+        -:  531:}
+        -:  532:
+        -:  533:int N_INDIRECT = FS_BLOCK_SIZE / sizeof(uint32_t);
+        -:  534:
+   271904:  535:static int get_or_alloc_on_fail(uint32_t* place_of_node, int alloc_on_fail) {
+   271904:  536:    if (!(*place_of_node)) {
+     5484:  537:        if (alloc_on_fail) {
+     2762:  538:            CALL_OR_RET_ERROR(block_allocation(), newblk);
+        -:  539:
+        -:  540:            static const void* zeroes[FS_BLOCK_SIZE] = {0};
+        -:  541:
+        -:  542:            // Zero out old block
+     2762:  543:            CALL_OR_RET_ERROR(block_write(zeroes, newblk, 1), write1);
+        -:  544:
+     2762:  545:            *place_of_node = (uint32_t) newblk;
+        -:  546:        } else {
+     2722:  547:            return -1;
+        -:  548:        }
+        -:  549:    }
+        -:  550:
+   269182:  551:    return *place_of_node;
+        -:  552:}
+        -:  553:
+        -:  554:#define N_BEFORE_INDIR_2 (N_DIRECT + N_INDIRECT)
+        -:  555:
+   194209:  556:static int get_blk_number(int nodenum, int num, int alloc_on_fail) {
+        -:  557:
+   194209:  558:    struct fs_inode* inode = &inodes[nodenum];
+        -:  559:
+   194209:  560:    uint32_t indir_ptr[N_INDIRECT];
+        -:  561:
+   194209:  562:    if (num < N_DIRECT) {
+        -:  563:
+   120582:  564:        return get_or_alloc_on_fail(&inode->direct[num], alloc_on_fail);
+        -:  565:
+    73627:  566:    } else if (num < N_DIRECT + N_INDIRECT) {
+        -:  567:        // Read indirect block
+    69519:  568:        CALL_OR_RET_ERROR(get_or_alloc_on_fail(&inode->indir_1, alloc_on_fail), loc);
+    69495:  569:        CALL_OR_RET_ERROR(block_read(indir_ptr, loc, 1), read);
+        -:  570:
+    69495:  571:        int indir_idx = num - N_DIRECT;
+        -:  572:
+        -:  573:        // Get the actual block
+    69495:  574:        CALL_OR_RET_ERROR(get_or_alloc_on_fail(&indir_ptr[indir_idx], alloc_on_fail), blknum);
+        -:  575:        // Write back indirect block
+    67207:  576:        CALL_OR_RET_ERROR(block_write(indir_ptr, loc, 1), err);
+        -:  577:
+    67207:  578:        return blknum;
+        -:  579:
+     4108:  580:    } else if (num < N_BEFORE_INDIR_2 + (N_INDIRECT * N_INDIRECT)) {
+        -:  581:
+        -:  582:        // Read first-level indirect 2
+     4108:  583:        CALL_OR_RET_ERROR(get_or_alloc_on_fail(&inode->indir_2, alloc_on_fail), loc_lvl_1);
+     4100:  584:        CALL_OR_RET_ERROR(block_read(indir_ptr, loc_lvl_1, 1), read);
+        -:  585:
+     4100:  586:        int indir_idx = num - N_BEFORE_INDIR_2;
+     4100:  587:        int idx_lvl_1 = indir_idx / N_INDIRECT;
+     4100:  588:        int idx_lvl_2 = indir_idx % N_INDIRECT;
+        -:  589:
+        -:  590:        // Read second-level indirect 2
+     4100:  591:        CALL_OR_RET_ERROR(get_or_alloc_on_fail(&indir_ptr[idx_lvl_1], alloc_on_fail), loc_lvl_2);
+        -:  592:        // Write back to first-level indirect
+     4100:  593:        CALL_OR_RET_ERROR(block_write(indir_ptr, loc_lvl_1, 1), err);
+        -:  594:
+     4100:  595:        CALL_OR_RET_ERROR(block_read(indir_ptr, loc_lvl_2, 1), read2);
+        -:  596:
+        -:  597:
+        -:  598:        // Allocate second-level indirect
+     4100:  599:        CALL_OR_RET_ERROR(get_or_alloc_on_fail(&indir_ptr[idx_lvl_2], alloc_on_fail), blknum);
+        -:  600:        // Write second-level indirect
+     3940:  601:        CALL_OR_RET_ERROR(block_write(indir_ptr, loc_lvl_2, 1), write1);
+        -:  602:
+     3940:  603:        return blknum;
+        -:  604:    }
+        -:  605:
+    #####:  606:    return -EINVAL;
+        -:  607:}
+        -:  608:
+   139083:  609:static int read_from_inode_block(void* read_buf, int block_number, int inode) {
+   139083:  610:    int blknum = get_blk_number(inode, block_number, 0);
+   139083:  611:    if (blknum < 0) return blknum;
+        -:  612:
+   139083:  613:    int read = block_read(read_buf, blknum, 1);
+   139083:  614:    return read;
+        -:  615:}
+        -:  616:
+   135554:  617:static int read_inode(int index, char* buf, size_t len, off_t offset) {
+   135554:  618:    struct fs_inode* i = &inodes[index];
+        -:  619:
+   135554:  620:    if (offset >= i->size)
+       62:  621:        return 0;
+        -:  622:
+   135492:  623:    if (len + offset > i->size)
+       80:  624:        len = (size_t) (i->size - offset);
+        -:  625:
+   135492:  626:    int j = 0;
+        -:  627:
+   135492:  628:    char temp_read_buff[FS_BLOCK_SIZE] = {0};
+        -:  629:
+   410067:  630:    while (j < len) {
+   139083:  631:        int block_number = (int) offset / FS_BLOCK_SIZE;
+   139083:  632:        int block_offset = (int) offset % FS_BLOCK_SIZE;
+        -:  633:
+   139083:  634:        int err = read_from_inode_block(temp_read_buff, block_number, index);
+   139083:  635:        if (err < 0) {
+    #####:  636:            return err;
+        -:  637:        }
+        -:  638:
+        -:  639:        // calculate the length to read:
+        -:  640:        size_t read_length;
+   139083:  641:        if ((FS_BLOCK_SIZE - block_offset) > (len - j))
+    69701:  642:            read_length = (len - j);
+        -:  643:        else
+    69382:  644:            read_length = (size_t) (FS_BLOCK_SIZE - block_offset);
+        -:  645:
+        -:  646:        //read and increase buffer.
+   139083:  647:        memcpy(buf + j, temp_read_buff + block_offset, read_length);
+   139083:  648:        j = j + read_length;
+   139083:  649:        offset = offset + read_length;
+        -:  650:    }
+        -:  651:
+   135492:  652:    return j;
+        -:  653:}
+        -:  654:
+        -:  655:
+        -:  656:/* read - read data from an open file.
+        -:  657: * should return exactly the number of bytes requested, except:
+        -:  658: *   - if offset >= file len, return 0
+        -:  659: *   - if offset+len > file len, return bytes from offset to EOF
+        -:  660: *   - on error, return <0
+        -:  661: * Errors - path resolution, ENOENT, EISDIR
+        -:  662: */
+    20560:  663:static int fs_read(const char* path, char* buf, size_t len, off_t offset,
+        -:  664:                   UNUSED struct fuse_file_info* fi) {
+    20560:  665:    int index = translate(path);
+        -:  666:
+    20560:  667:    if (index < 0)
+        3:  668:        return index;
+        -:  669:
+    20557:  670:    if (S_ISDIR(inodes[index].mode)) {
+        1:  671:        return -EISDIR;
+        -:  672:    }
+        -:  673:
+    20556:  674:    return read_inode(index, buf, len, offset);
+        -:  675:}
+        -:  676:
+        -:  677:
+        -:  678:/* chmod - change file permissions
+        -:  679: * utime - change access and modification times
+        -:  680: *         (for definition of 'struct utimebuf', see 'man utime')
+        -:  681: *
+        -:  682: * Errors - path resolution, ENOENT.
+        -:  683: */
+        9:  684:static int fs_chmod(const char* path, mode_t mode) {
+        9:  685:    CALL_OR_RET_ERROR(translate(path), inodenum);
+        -:  686:
+        8:  687:    int isDir = inodes[inodenum].mode & S_IFDIR;
+        8:  688:    inodes[inodenum].mode = mode | isDir;
+        -:  689:
+        8:  690:    return flush_inodes_bitmaps();
+        -:  691:}
+        -:  692:
+        1:  693:int fs_utime(const char* path, struct utimbuf* ut) {
+        1:  694:    CALL_OR_RET_ERROR(translate(path), inodenum);
+        -:  695:
+        1:  696:    time_t ctime = (ut->modtime == 0) ? time(NULL) : ut->modtime;
+        1:  697:    inodes[inodenum].ctime = (uint32_t) ctime;
+        -:  698:
+        1:  699:    return flush_inodes_bitmaps();
+        -:  700:}
+        -:  701:
+      682:  702:void dealloc(int blknum) {
+      682:  703:    assert(blknum > 0);
+      682:  704:    if (bit_test(block_map, blknum)) bit_clear(block_map, blknum);
+      682:  705:}
+        -:  706:
+        -:  707:/* truncate - truncate file to exactly 'len' bytes
+        -:  708: * Errors - path resolution, ENOENT, EISDIR, EINVAL
+        -:  709: *    return EINVAL if len > 0.
+        -:  710: */
+       19:  711:static int fs_truncate(const char* path, off_t len) {
+        -:  712:    /* you can cheat by only implementing this for the case of len==0,
+        -:  713:     * and an error otherwise.
+        -:  714:     */
+       19:  715:    if (len != 0)
+    #####:  716:        return -EINVAL;        /* invalid argument */
+        -:  717:
+       19:  718:    int index = translate(path);
+       19:  719:    if (index < 0)
+        1:  720:        return index;
+        -:  721:
+       18:  722:    struct fs_inode* node = &inodes[index];
+        -:  723:
+       18:  724:    if (S_ISDIR(node->mode))
+    #####:  725:        return -EISDIR;
+        -:  726:
+        -:  727:    // Mark blocks as free
+      690:  728:    for (int blkidx = 0; blkidx < DIV_ROUND_UP(node->size, 1024); blkidx++) {
+      672:  729:        int blknum = get_blk_number(index, blkidx, 0);
+      672:  730:        if (blknum < 0) return blknum;
+        -:  731:
+      672:  732:        dealloc(blknum);
+        -:  733:    }
+        -:  734:
+        -:  735:    // Delete pointers to blocks
+       18:  736:    int block = 0;
+      126:  737:    for (; block < N_DIRECT; block++) {
+      108:  738:        node->direct[block] = 0;
+        -:  739:    }
+        -:  740:
+        -:  741:    // delete all indir1 data
+       18:  742:    if (node->indir_1) {
+        6:  743:        dealloc(node->indir_1);
+        6:  744:        node->indir_1 = 0;
+        -:  745:    }
+        -:  746:
+       18:  747:    if (node->indir_2) {
+        -:  748:
+        2:  749:        uint32_t ptr_for_indr2_l1[N_INDIRECT];
+        -:  750:
+        2:  751:        block_read(&ptr_for_indr2_l1, node->indir_2, 1);
+        -:  752:
+      514:  753:        for (int indiridx = 0; indiridx < N_INDIRECT; indiridx++) {
+      512:  754:            if (ptr_for_indr2_l1[indiridx]) {
+        2:  755:                dealloc(ptr_for_indr2_l1[indiridx]);
+        -:  756:            }
+        -:  757:        }
+        -:  758:
+        2:  759:        dealloc(node->indir_2);
+        2:  760:        node->indir_2 = 0;
+        -:  761:    }
+        -:  762:
+       18:  763:    node->size = 0;
+       18:  764:    node->mtime = (uint32_t) time(NULL);
+        -:  765:
+        -:  766:
+       18:  767:    return flush_inodes_bitmaps();
+        -:  768:}
+        -:  769:
+        -:  770:/* unlink - delete a file
+        -:  771: *  Errors - path resolution, ENOENT, EISDIR
+        -:  772: * Note that you have to delete (i.e. truncate) all the data.
+        -:  773: */
+        9:  774:static int fs_unlink(const char* path) {
+        -:  775:
+        9:  776:    int index = translate(path);
+        9:  777:    if (index < 0)
+    #####:  778:        return index;
+        -:  779:
+        -:  780:    //truncate all data and check:
+        9:  781:    int truncate_check = fs_truncate(path, 0);
+        9:  782:    if (truncate_check < 0)
+    #####:  783:        return truncate_check;
+        -:  784:
+        -:  785:    // get file name:
+        -:  786:    char* file_name;
+        -:  787:    char* parent_directory;
+        9:  788:    split_path(path, &parent_directory, &file_name);
+        9:  789:    int i_dir = translate(parent_directory);
+        -:  790:
+        9:  791:    int remove_err = remove_from_directory((uint32_t) i_dir, file_name);
+        -:  792:
+        9:  793:    free(file_name);
+        9:  794:    free(parent_directory);
+        -:  795:
+        9:  796:    if(remove_err < 0){
+    #####:  797:        return remove_err;
+        -:  798:    }
+        -:  799:
+        9:  800:    inodes[i_dir].mtime = (uint32_t) time(NULL);
+        9:  801:    bit_clear(inode_map, index);
+        -:  802:
+        9:  803:    return flush_inodes_bitmaps();
+        -:  804:}
+        -:  805:
+        -:  806:/* rmdir - remove a directory
+        -:  807: *  Errors - path resolution, ENOENT, ENOTDIR, ENOTEMPTY
+        -:  808: */
+        2:  809:static int fs_rmdir(const char* path) {
+        2:  810:    CALL_OR_RET_ERROR(translate(path), index)
+        -:  811:
+        2:  812:    struct fs_inode* node = &inodes[index];
+        -:  813:
+        2:  814:    if(S_ISDIR(node->mode)) return -ENOTDIR;
+        -:  815:
+        1:  816:    struct fs_dirent* entries = malloc((size_t) node->size);
+        1:  817:    int num_entries = node->size / sizeof(*entries);
+        -:  818:
+        1:  819:    int num_valid = 0;
+        -:  820:
+        1:  821:    for(int i = 0; i<num_entries; i++){
+    #####:  822:        if(entries[i].valid){
+    #####:  823:            num_valid++;
+        -:  824:        }
+        -:  825:    }
+        -:  826:
+        1:  827:    free(entries);
+        -:  828:
+        1:  829:    if(num_valid > 0){
+    #####:  830:        return -ENOTEMPTY;
+        -:  831:    }
+        -:  832:
+        -:  833:    char* parent;
+        -:  834:    char* child;
+        1:  835:    split_path(path, &parent, &child);
+        -:  836:
+        1:  837:    int err = remove_from_directory((uint32_t) index, child);
+        -:  838:
+        1:  839:    free(parent);
+        1:  840:    free(child);
+        -:  841:
+        1:  842:    CALL_OR_RET_ERROR(flush_inodes_bitmaps(), flush);
+        -:  843:
+        1:  844:    return err;
+        -:  845:}
+        -:  846:
+        -:  847:// Helper method to avoid messy resource cleaning in fs_rename
+        3:  848:static int move_from_to(const char* src_dir, const char* src_file,
+        -:  849:        const char* dst_dir, const char* dst_file){
+        -:  850:
+        3:  851:    CALL_OR_RET_ERROR(translate(src_dir), src_inode);
+        3:  852:    if(!S_ISDIR(inodes[src_inode].mode)) return -ENOTDIR;
+        -:  853:
+        3:  854:    CALL_OR_RET_ERROR(translate(dst_dir), dst_inode);
+        3:  855:    if(!S_ISDIR(inodes[dst_inode].mode)) return -ENOTDIR;
+        -:  856:
+        3:  857:    CALL_OR_RET_ERROR(remove_from_directory((uint32_t) src_inode, src_file), file_inode);
+        3:  858:    return add_to_directory((uint32_t) dst_inode, (uint32_t) file_inode, dst_file);
+        -:  859:}
+        -:  860:
+        -:  861:/* rename - rename a file or directory
+        -:  862: * Errors - path resolution, ENOENT, EINVAL, EEXIST
+        -:  863: *
+        -:  864: * ENOENT - source does not exist
+        -:  865: * EEXIST - destination already exists
+        -:  866: * EINVAL - source and destination are not in the same directory
+        -:  867: *
+        -:  868: * Note that this is a simplified version of the UNIX rename
+        -:  869: * functionality - see 'man 2 rename' for full semantics. In
+        -:  870: * particular, the full version can move across directories, replace a
+        -:  871: * destination file, and replace an empty directory with a full one.
+        -:  872: */
+        6:  873:static int fs_rename(const char* src_path, const char* dst_path) {
+        6:  874:    CALL_OR_RET_ERROR(translate(src_path), idx_from);
+        -:  875:
+        5:  876:    int idx_to = translate(dst_path);
+        5:  877:    if(idx_to >= 0) return -EEXIST;
+        -:  878:
+        -:  879:    char* source_dir;
+        -:  880:    char* source_file;
+        -:  881:
+        -:  882:    char* dest_dir;
+        -:  883:    char* dest_file;
+        -:  884:
+        3:  885:    split_path(src_path, &source_dir, &source_file);
+        3:  886:    split_path(dst_path, &dest_dir, &dest_file);
+        -:  887:
+        3:  888:    int ret = move_from_to(source_dir, source_file, dest_dir, dest_file);
+        -:  889:
+        3:  890:    free(source_dir);
+        3:  891:    free(source_file);
+        3:  892:    free(dest_dir);
+        3:  893:    free(dest_file);
+        -:  894:
+        3:  895:    CALL_OR_RET_ERROR(flush_inodes_bitmaps(), flush);
+        -:  896:
+        3:  897:    return ret;
+        -:  898:}
+        -:  899:
+    24602:  900:static int write_inode(int index, const char* buf, size_t len, off_t offset) {
+    24602:  901:    struct fs_inode* i = &inodes[index];
+        -:  902:
+    24602:  903:    if (offset > i->size) {
+    #####:  904:        return -EINVAL;
+        -:  905:    }
+        -:  906:
+    24602:  907:    int first_blk_idx = (int) offset / FS_BLOCK_SIZE;
+    24602:  908:    int first_blk_offset = (int) offset % FS_BLOCK_SIZE;
+        -:  909:
+    24602:  910:    off_t end = len + offset;
+        -:  911:
+    24602:  912:    int last_blk_idx = (int) end / FS_BLOCK_SIZE;
+    24602:  913:    int last_blk_len = (int) end % FS_BLOCK_SIZE;
+        -:  914:
+    24602:  915:    int write_idx = 0;
+        -:  916:
+        -:  917:    char tmp_buffer[FS_BLOCK_SIZE];
+        -:  918:
+    51829:  919:    for (int current_blk = first_blk_idx; current_blk <= last_blk_idx; current_blk++) {
+    27227:  920:        int blk_no_allocate = get_blk_number(index, current_blk, 0);
+    27227:  921:        int blk_actual_idx = get_blk_number(index, current_blk, 1);
+        -:  922:
+    27227:  923:        if (blk_actual_idx < 0) {
+    #####:  924:            return blk_actual_idx;
+        -:  925:        }
+        -:  926:
+    27227:  927:        int data_already_exists = (blk_no_allocate == blk_actual_idx);
+        -:  928:
+    27227:  929:        int is_first_block = (current_blk == first_blk_idx);
+    27227:  930:        int is_last_block = (current_blk == last_blk_idx);
+        -:  931:
+    27227:  932:        int start_write = is_first_block ? first_blk_offset : 0;
+    27227:  933:        int end_write = is_last_block ? last_blk_len : FS_BLOCK_SIZE;
+        -:  934:
+    27227:  935:        size_t write_len = (size_t) end_write - start_write;
+    27227:  936:        if (write_len == 0) continue;
+        -:  937:
+    51042:  938:        if (data_already_exists && write_len < FS_BLOCK_SIZE) {
+    24183:  939:            int err = block_read(tmp_buffer, blk_actual_idx, 1);
+    24183:  940:            if (err < 0) {
+    #####:  941:                return err;
+        -:  942:            }
+        -:  943:        } else {
+     2676:  944:            memset(tmp_buffer, 0, FS_BLOCK_SIZE);
+        -:  945:        }
+        -:  946:
+    26859:  947:        memcpy(tmp_buffer + start_write, buf + write_idx, write_len);
+    26859:  948:        block_write(tmp_buffer, blk_actual_idx, 1);
+        -:  949:
+    26859:  950:        write_idx += write_len;
+        -:  951:    }
+        -:  952:
+    24602:  953:    if (end > i->size) {
+    24570:  954:        i->size = (int32_t) end;
+        -:  955:    }
+        -:  956:
+    24602:  957:    return len;
+        -:  958:}
+        -:  959:
+        -:  960:/* write - write data to a file
+        -:  961: * It should return exactly the number of bytes requested, except on
+        -:  962: * error.
+        -:  963: * Errors - path resolution, ENOENT, EISDIR
+        -:  964: *  return EINVAL if 'offset' is greater than current file length.
+        -:  965: *  (POSIX semantics support the creation of files with "holes" in them, 
+        -:  966: *   but we don't)
+        -:  967: */
+    24401:  968:static int fs_write(const char* path, const char* buf, size_t len,
+        -:  969:                    off_t offset, UNUSED struct fuse_file_info* fi) {
+    24401:  970:    int index = translate(path);
+    24401:  971:    if (index < 0)
+        1:  972:        return index;
+        -:  973:
+    24400:  974:    if (S_ISDIR(inodes[index].mode))
+    #####:  975:        return -EISDIR;
+        -:  976:
+    24400:  977:    int ret = write_inode(index, buf, len, offset);
+        -:  978:
+    24400:  979:    CALL_OR_RET_ERROR(flush_inodes_bitmaps(), flush);
+        -:  980:
+    24400:  981:    return ret;
+        -:  982:}
+        -:  983:
+        -:  984:/* statfs - get file system statistics
+        -:  985: * see 'man 2 statfs' for description of 'struct statvfs'.
+        -:  986: * Errors - none. 
+        -:  987: */
+        6:  988:static int fs_statfs(UNUSED const char* path, struct statvfs* st) {
+        -:  989:    /* needs to return the following fields (set others to zero):
+        -:  990:     *   f_bsize = BLOCK_SIZE
+        -:  991:     *   f_blocks = total image - metadata
+        -:  992:     *   f_bfree = f_blocks - blocks used
+        -:  993:     *   f_bavail = f_bfree
+        -:  994:     *   f_namelen = <whatever your max namelength is>
+        -:  995:     *
+        -:  996:     * this should work fine, but you may want to add code to
+        -:  997:     * calculate the correct values later.
+        -:  998:     */
+        6:  999:    st->f_bsize = FS_BLOCK_SIZE;
+        6: 1000:    st->f_blocks = (__fsblkcnt_t) no_of_blocks;
+        -: 1001:
+        6: 1002:    size_t no_of_blocks_used = 0;
+    52230: 1003:    for (int i = 0; i < no_of_blocks; i++)
+    52224: 1004:        if (bit_test(block_map, i))
+    11487: 1005:            no_of_blocks_used++;
+        -: 1006:
+        6: 1007:    st->f_bfree = no_of_blocks - no_of_blocks_used;            /* change these */
+        6: 1008:    st->f_bavail = st->f_bfree;           /* values */
+        6: 1009:    st->f_namemax = 27;
+        -: 1010:
+        6: 1011:    return 0;
+        -: 1012:}
+        -: 1013:
+        -: 1014:
+        -: 1015:
+        -: 1016:/* operations vector. Please don't rename it, as the code in
+        -: 1017: * misc.c and libhw3.c assumes it is named 'fs_ops'.
+        -: 1018: */
+        -: 1019:struct fuse_operations fs_ops = {
+        -: 1020:        .init = fs_init,
+        -: 1021:        .getattr = fs_getattr,
+        -: 1022:        .readdir = fs_readdir,
+        -: 1023:        .create = fs_create,
+        -: 1024:        .mkdir = fs_mkdir,
+        -: 1025:        .unlink = fs_unlink,
+        -: 1026:        .rmdir = fs_rmdir,
+        -: 1027:        .rename = fs_rename,
+        -: 1028:        .chmod = fs_chmod,
+        -: 1029:        .utime = fs_utime,
+        -: 1030:        .truncate = fs_truncate,
+        -: 1031:        .read = fs_read,
+        -: 1032:        .write = fs_write,
+        -: 1033:        .statfs = fs_statfs,
+        -: 1034:};
+        -: 1035:
